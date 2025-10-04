@@ -1,0 +1,147 @@
+﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WLAN Share</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1> WLAN Share</h1>
+            <p>Dateien einfach über das lokale Netzwerk teilen</p>
+        </header>
+
+        <section class="upload-section">
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon"></div>
+                <h3>Dateien hochladen</h3>
+                <p>Dateien hier hinziehen oder klicken zum Auswählen</p>
+                <input type="file" id="fileInput" multiple style="display: none;">
+                <button class="select-files-btn" onclick="document.getElementById('fileInput').click()">
+                    Dateien auswählen
+                </button>
+            </div>
+            
+            <div class="progress-container" id="progressContainer" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-text" id="progressText">0%</div>
+            </div>
+            
+            <div class="selected-files" id="selectedFiles" style="display: none;">
+                <h4>Ausgewählte Dateien:</h4>
+                <div class="file-list" id="fileList"></div>
+                <button class="upload-btn" onclick="uploadFiles()"> Hochladen</button>
+            </div>
+        </section>
+
+        <section class="file-list-section">
+            <div class="section-header">
+                <h2> Verfügbare Dateien ({{ files|length }})</h2>
+                {% if files %}
+                <a href="/zip" class="zip-download-btn"> Alles als ZIP</a>
+                {% endif %}
+            </div>
+
+            {% if files %}
+            <div class="files-grid">
+                {% for file in files %}
+                <div class="file-card">
+                    <div class="file-info">
+                        <div class="file-icon"></div>
+                        <div class="file-details">
+                            <div class="file-name">{{ file.name }}</div>
+                            <div class="file-size">{{ file.size_mb }} MB</div>
+                        </div>
+                    </div>
+                    <div class="file-actions">
+                        <a href="/download/{{ file.name }}" class="download-btn"> Download</a>
+                        <button class="delete-btn" onclick="deleteFile('{{ file.name }}')"></button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-icon"></div>
+                <h3>Keine Dateien vorhanden</h3>
+                <p>Dateien hochladen um zu beginnen</p>
+            </div>
+            {% endif %}
+        </section>
+    </div>
+
+    <script>
+        let selectedFiles = [];
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const selectedFilesDiv = document.getElementById('selectedFiles');
+        const fileList = document.getElementById('fileList');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            selectedFiles = Array.from(e.dataTransfer.files);
+            displaySelectedFiles();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            selectedFiles = Array.from(e.target.files);
+            displaySelectedFiles();
+        });
+
+        function displaySelectedFiles() {
+            if (selectedFiles.length === 0) return;
+            selectedFilesDiv.style.display = 'block';
+            fileList.innerHTML = '';
+            selectedFiles.forEach(file => {
+                const div = document.createElement('div');
+                div.textContent = file.name;
+                fileList.appendChild(div);
+            });
+        }
+
+        async function uploadFiles() {
+            if (selectedFiles.length === 0) return;
+            progressContainer.style.display = 'block';
+            
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const formData = new FormData();
+                formData.append('file', selectedFiles[i]);
+                
+                try {
+                    await fetch('/upload', { method: 'POST', body: formData });
+                    const progress = Math.round(((i + 1) / selectedFiles.length) * 100);
+                    progressFill.style.width = progress + '%';
+                    progressText.textContent = progress + '%';
+                } catch (error) {
+                    console.error('Upload error:', error);
+                }
+            }
+            
+            setTimeout(() => location.reload(), 1000);
+        }
+
+        async function deleteFile(filename) {
+            if (!confirm('Datei löschen?')) return;
+            try {
+                await fetch(`/delete/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+                location.reload();
+            } catch (error) {
+                console.error('Delete error:', error);
+            }
+        }
+    </script>
+</body>
+</html>
