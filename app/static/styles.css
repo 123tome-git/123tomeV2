@@ -275,19 +275,21 @@ section {
     position: absolute;
     right: 12px;
     bottom: 12px;
-    font-size: 0.85rem;
+    font-size: 1rem;
+    font-weight: bold;
     color: #9ca3af;
     pointer-events: none;
+    transition: color 0.3s ease;
 }
 
 .expand-btn {
-    background: #f3f4f6;
-    color: #4b5563;
-    border: 2px solid #e5e7eb;
-    width: 40px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    width: 44px;
     height: 40px;
     border-radius: 10px;
-    font-size: 1.2rem;
+    font-size: 1.3rem;
     font-weight: bold;
     cursor: pointer;
     transition: all 0.3s ease;
@@ -295,13 +297,12 @@ section {
     display: flex;
     align-items: center;
     justify-content: center;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
 }
 
 .expand-btn:hover {
-    background: #e5e7eb;
-    border-color: #d1d5db;
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
 }
 
 .expand-btn:active {
