@@ -38,6 +38,30 @@
             </div>
         </section>
 
+        <section class="sync-text-section">
+            <h3>📋 Sync-Text</h3>
+            <div class="sync-text-container">
+                <button class="expand-btn" id="expandBtn" onclick="toggleExpand()" title="Expand">
+                    <span id="expandIcon">^</span>
+                </button>
+                <div class="text-input-wrapper">
+                    <textarea 
+                        id="syncText" 
+                        class="sync-text-field" 
+                        placeholder="Text hier eingeben zum Synchronisieren..."
+                        rows="1"
+                    ></textarea>
+                    <span class="status-indicator" id="statusIndicator"></span>
+                </div>
+                <button class="copy-btn" id="copyBtn" onclick="copyLastText()" title="Copy to clipboard">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                </button>
+            </div>
+        </section>
+
         <section class="file-list-section">
             <div class="section-header">
                 <h2> Verfügbare Dateien ({{ files|length }})</h2>
@@ -142,6 +166,255 @@
                 console.error('Delete error:', error);
             }
         }
+
+        // Sync text functionality
+        const syncText = document.getElementById('syncText');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const expandBtn = document.getElementById('expandBtn');
+        let lastSentText = '';
+        let lastSentTimestamp = 0;
+        let isExpanded = false;
+        let manuallyExpanded = false;
+        let lastKnownContent = '';
+        let lastKnownTimestamp = 0;
+
+        // Auto-adjust height
+        function adjustHeight() {
+            if (!manuallyExpanded) {
+                syncText.style.height = 'auto';
+                if (syncText.value.length > 0) {
+                    const scrollHeight = syncText.scrollHeight;
+                    const singleLineHeight = 45; // approximate single line height
+                    if (scrollHeight > singleLineHeight && !isExpanded) {
+                        syncText.style.height = Math.min(scrollHeight, 150) + 'px';
+                    } else if (isExpanded) {
+                        syncText.style.height = Math.min(scrollHeight, 150) + 'px';
+                    } else {
+                        syncText.style.height = singleLineHeight + 'px';
+                    }
+                }
+            }
+        }
+
+        // Update status indicator
+        function updateStatus(status) {
+            if (status === 'sent') {
+                statusIndicator.innerHTML = '✓';
+                statusIndicator.style.color = '#9ca3af';
+            } else if (status === 'delivered') {
+                statusIndicator.innerHTML = '✓✓';
+                statusIndicator.style.color = '#667eea';
+            } else {
+                statusIndicator.innerHTML = '';
+            }
+        }
+
+        // Handle input
+        syncText.addEventListener('input', () => {
+            adjustHeight();
+        });
+
+        // Handle focus
+        syncText.addEventListener('focus', () => {
+            if (!manuallyExpanded && syncText.value.length > 50) {
+                isExpanded = true;
+                adjustHeight();
+            }
+        });
+
+        // Handle Enter key
+        syncText.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                await sendSyncText();
+                isExpanded = false;
+                manuallyExpanded = false;
+                syncText.rows = 1;
+                syncText.style.height = 'auto';
+                syncText.classList.remove('expanded');
+            }
+        });
+
+        // Send sync text to server
+        async function sendSyncText() {
+            const text = syncText.value.trim();
+            if (text === '') return;
+            
+            lastSentText = text;
+            lastSentTimestamp = Date.now();
+            updateStatus('sent');
+            
+            try {
+                const timestamp = lastSentTimestamp;
+                const payload = JSON.stringify({
+                    text: text,
+                    timestamp: timestamp
+                });
+                const blob = new Blob([payload], { type: 'application/json' });
+                const formData = new FormData();
+                formData.append('file', blob, '.clipboard-sync.txt');
+                
+                await fetch('/upload', { method: 'POST', body: formData });
+                
+                // Wait a bit then check for delivery
+                setTimeout(checkDeliveryStatus, 1500);
+            } catch (error) {
+                console.error('Sync error:', error);
+                updateStatus('');
+            }
+        }
+
+        // Check if message was delivered
+        function checkDeliveryStatus() {
+            if (lastKnownTimestamp >= lastSentTimestamp) {
+                updateStatus('delivered');
+            }
+        }
+
+        // Toggle expand
+        function toggleExpand() {
+            manuallyExpanded = !manuallyExpanded;
+            if (manuallyExpanded) {
+                syncText.rows = 5;
+                syncText.style.height = '150px';
+                syncText.classList.add('expanded');
+                expandBtn.classList.add('expanded');
+            } else {
+                syncText.rows = 1;
+                syncText.style.height = 'auto';
+                syncText.classList.remove('expanded');
+                expandBtn.classList.remove('expanded');
+                adjustHeight();
+            }
+        }
+
+        // Copy last text (with fallback for non-HTTPS)
+        function copyLastText() {
+            const textToCopy = syncText.value.trim() || lastSentText;
+            if (!textToCopy) return;
+            
+            let success = false;
+            
+            // Method 1: Modern Clipboard API (works on HTTPS and localhost)
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(textToCopy)
+                    .then(() => {
+                        showCopySuccess();
+                    })
+                    .catch((error) => {
+                        console.log('Clipboard API failed, trying fallback method:', error);
+                        fallbackCopy(textToCopy);
+                    });
+            } else {
+                // Method 2: Fallback for non-secure contexts
+                fallbackCopy(textToCopy);
+            }
+        }
+        
+        // Fallback copy method using textarea
+        function fallbackCopy(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-999999px';
+            textarea.style.top = '-999999px';
+            document.body.appendChild(textarea);
+            
+            textarea.focus();
+            textarea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showCopySuccess();
+                } else {
+                    showCopyError();
+                }
+            } catch (error) {
+                console.error('Fallback copy failed:', error);
+                showCopyError();
+            } finally {
+                document.body.removeChild(textarea);
+            }
+        }
+        
+        // Show copy success animation
+        function showCopySuccess() {
+            const btn = document.getElementById('copyBtn');
+            btn.classList.add('success');
+            
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+            
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+                btn.classList.remove('success');
+            }, 1500);
+        }
+        
+        // Show copy error
+        function showCopyError() {
+            const btn = document.getElementById('copyBtn');
+            const originalHTML = btn.innerHTML;
+            btn.style.background = 'linear-gradient(135deg, #f56565 0%, #e53e3e 100%)';
+            btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"></path></svg>';
+            
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+                btn.style.background = '';
+            }, 1500);
+        }
+
+        // Poll for sync text updates
+        async function pollSyncText() {
+            try {
+                const response = await fetch('/download/.clipboard-sync.txt');
+                if (response.ok) {
+                    const jsonText = await response.text();
+                    try {
+                        const data = JSON.parse(jsonText);
+                        const text = data.text || jsonText;
+                        const timestamp = data.timestamp || Date.now();
+                        
+                        if (text !== lastKnownContent) {
+                            lastKnownContent = text;
+                            lastKnownTimestamp = timestamp;
+                            
+                            if (document.activeElement !== syncText) {
+                                syncText.value = text;
+                                lastSentText = text;
+                                adjustHeight();
+                                
+                                // If this is not our own message, show delivered status
+                                if (timestamp !== lastSentTimestamp) {
+                                    updateStatus('');
+                                } else {
+                                    updateStatus('delivered');
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Fallback for plain text format
+                        if (jsonText !== lastKnownContent) {
+                            lastKnownContent = jsonText;
+                            lastKnownTimestamp = Date.now();
+                            
+                            if (document.activeElement !== syncText) {
+                                syncText.value = jsonText;
+                                lastSentText = jsonText;
+                                adjustHeight();
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                // File might not exist yet, ignore
+            }
+        }
+
+        // Start polling
+        setInterval(pollSyncText, 1000);
+        pollSyncText(); // Initial load
     </script>
 </body>
 </html>

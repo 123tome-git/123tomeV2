@@ -58,7 +58,7 @@ def get_file_list():
     files = []
     if SHARED_DIR.exists():
         for file_path in SHARED_DIR.iterdir():
-            if file_path.is_file():
+            if file_path.is_file() and not file_path.name.startswith('.'):
                 stat = file_path.stat()
                 files.append({
                     "name": file_path.name,
@@ -119,6 +119,70 @@ async def delete_file(filename: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting file: {str(e)}")
 
+# ---------- Clipboard monitoring for Windows ----------
+def monitor_clipboard():
+    """Monitor Windows clipboard and sync to file."""
+    try:
+        import win32clipboard
+        import win32con
+        import json
+        
+        print("[clipboard] Starting clipboard monitor...")
+        last_clipboard = ""
+        clipboard_file = SHARED_DIR / ".clipboard-sync.txt"
+        
+        # Wait a bit for the server to start
+        time.sleep(2)
+        
+        while True:
+            try:
+                time.sleep(0.3)  # Check every 300ms
+                
+                # Try to open clipboard
+                try:
+                    win32clipboard.OpenClipboard()
+                    clipboard_opened = True
+                except:
+                    clipboard_opened = False
+                    time.sleep(0.2)
+                    continue
+                
+                try:
+                    if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                        clipboard_text = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+                        
+                        # Only update if clipboard changed and has content
+                        if clipboard_text and clipboard_text.strip() and clipboard_text != last_clipboard:
+                            last_clipboard = clipboard_text
+                            
+                            # Write to sync file with timestamp
+                            try:
+                                payload = json.dumps({
+                                    "text": clipboard_text,
+                                    "timestamp": int(time.time() * 1000)
+                                })
+                                with open(clipboard_file, 'w', encoding='utf-8') as f:
+                                    f.write(payload)
+                                print(f"[clipboard] Synced: {clipboard_text[:50]}...")
+                            except Exception as e:
+                                print(f"[clipboard] Error writing to file: {e}")
+                finally:
+                    if clipboard_opened:
+                        try:
+                            win32clipboard.CloseClipboard()
+                        except:
+                            pass
+                    
+            except Exception as e:
+                # Clipboard might be locked by another process, just continue
+                time.sleep(0.2)
+                
+    except ImportError as e:
+        print(f"[clipboard] pywin32 not available ({e}), clipboard sync disabled")
+        print("[clipboard] Install with: pip install pywin32")
+    except Exception as e:
+        print(f"[clipboard] Monitor error: {e}")
+
 # ---------- Dev entrypoint (uvicorn) ----------
 if __name__ == "__main__":
     import uvicorn
@@ -126,6 +190,10 @@ if __name__ == "__main__":
 
     HOST, PORT = "0.0.0.0", 8000
     URL = f"http://localhost:{PORT}/"
+
+    # Start clipboard monitoring in background
+    clipboard_thread = threading.Thread(target=monitor_clipboard, daemon=True)
+    clipboard_thread.start()
 
     # Start FastAPI in a background thread
     def run_server():
