@@ -3,9 +3,16 @@ from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from dataclasses import dataclass
+from contextlib import suppress
 import sys, os, io, zipfile, shutil
-from typing import List
+from typing import List, Optional
 import threading, time, socket
+
+try:
+    from zeroconf import Zeroconf, ServiceInfo, ServiceBrowser
+except ImportError:  # pragma: no cover - optional dependency
+    Zeroconf = ServiceInfo = ServiceBrowser = None
 
 
 def wait_for_port(host: str, port: int, timeout: float = 5.0) -> bool:
@@ -46,6 +53,99 @@ else:
 # Persistent shared folder (user profile), so the EXE has a writable place
 SHARED_DIR = Path(os.environ.get("WLAN_SHARE_DIR", Path.home() / "WLAN-Share"))
 SHARED_DIR.mkdir(parents=True, exist_ok=True)
+
+MDNS_SERVICE_TYPE = "_123tome._tcp.local."
+MDNS_INSTANCE_BASE = "WLAN Share"
+MDNS_DISCOVERY_TIMEOUT = 10.0
+
+
+@dataclass
+class MdnsService:
+    name: str
+    host: str
+    port: int
+
+
+@dataclass
+class MdnsRegistration:
+    zeroconf: "Zeroconf"
+    info: "ServiceInfo"
+
+    def close(self) -> None:
+        with suppress(Exception):
+            self.zeroconf.unregister_service(self.info)
+        with suppress(Exception):
+            self.zeroconf.close()
+
+
+def get_local_ip(fallback: str = "127.0.0.1") -> str:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return fallback
+
+
+def discover_existing_service(timeout: float = MDNS_DISCOVERY_TIMEOUT) -> Optional[MdnsService]:
+    if Zeroconf is None:
+        return None
+
+    zeroconf = Zeroconf()
+    found: Optional[MdnsService] = None
+    event = threading.Event()
+
+    class Listener:  # type: ignore[override]
+        def add_service(self, zc, service_type, name):
+            nonlocal found
+            info = zc.get_service_info(service_type, name)
+            if info:
+                addresses = info.parsed_addresses()
+                if addresses:
+                    found = MdnsService(name=name, host=addresses[0], port=info.port)
+                    event.set()
+
+        def update_service(self, zc, service_type, name):
+            pass
+
+        def remove_service(self, zc, service_type, name):
+            pass
+
+    listener = Listener()
+    browser = ServiceBrowser(zeroconf, MDNS_SERVICE_TYPE, listener)
+    event.wait(timeout)
+    with suppress(Exception):
+        browser.cancel()
+    zeroconf.close()
+    return found
+
+
+def register_mdns_service(port: int, local_ip: str) -> Optional[MdnsRegistration]:
+    if Zeroconf is None:
+        print("[mdns] zeroconf library not installed; skipping advertisement")
+        return None
+    try:
+        zeroconf = Zeroconf()
+        address_bytes = socket.inet_aton(local_ip)
+        hostname = socket.gethostname()
+        # Ensure server ends with .local. so some stacks display a nice name
+        server_fqdn = f"{hostname}.local."
+        info = ServiceInfo(
+            MDNS_SERVICE_TYPE,
+            f"123toMe-{hostname}.{MDNS_SERVICE_TYPE}",  # instance name
+            addresses=[address_bytes],
+            port=port,
+            properties={"path": "/"},
+            server=server_fqdn,
+        )
+        zeroconf.register_service(info)
+        print(f"[mdns] Registered service {info.name} at {local_ip}:{port}")
+        return MdnsRegistration(zeroconf=zeroconf, info=info)
+    except Exception as exc:
+        print(f"[mdns] Failed to register service: {exc}")
+        return None
 
 # ---------- FastAPI ----------
 app = FastAPI(title="WLAN Share", description="Simple file sharing over WLAN")
@@ -187,23 +287,46 @@ def monitor_clipboard():
 if __name__ == "__main__":
     import uvicorn
     import webbrowser
+    import atexit
 
     HOST, PORT = "0.0.0.0", 8000
-    URL = f"http://localhost:{PORT}/"
 
-    # Start clipboard monitoring in background
-    clipboard_thread = threading.Thread(target=monitor_clipboard, daemon=True)
-    clipboard_thread.start()
+    discovered = discover_existing_service()
+    is_hosting = discovered is None
+    target_host = "127.0.0.1" if is_hosting else discovered.host
+    target_port = PORT if is_hosting else discovered.port
+    target_url = f"http://{target_host}:{target_port}/"
+    network_url: Optional[str] = None
+    mdns_registration: Optional[MdnsRegistration] = None
 
-    # Start FastAPI in a background thread
-    def run_server():
-        uvicorn.run(app, host=HOST, port=PORT, log_level="info")
+    server_thread: Optional[threading.Thread] = None
 
-    t = threading.Thread(target=run_server, daemon=True)
-    t.start()
+    if is_hosting:
+        print("[mdns] No existing WLAN Share service found. Hosting locally.")
 
-    # Wait until the server is reachable
-    ready = wait_for_port("127.0.0.1", PORT, timeout=8.0)
+        clipboard_thread = threading.Thread(target=monitor_clipboard, daemon=True)
+        clipboard_thread.start()
+
+        def run_server():
+            uvicorn.run(app, host=HOST, port=PORT, log_level="info")
+
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
+
+        ready = wait_for_port("127.0.0.1", PORT, timeout=8.0)
+        if not ready:
+            time.sleep(0.8)
+        local_ip = get_local_ip()
+        network_url = f"http://{local_ip}:{PORT}/"
+        mdns_registration = register_mdns_service(PORT, local_ip)
+        if mdns_registration:
+            atexit.register(mdns_registration.close)
+    else:
+        print(f"[mdns] Found existing WLAN Share server at {target_url} ({discovered.name})")
+        ready = wait_for_port(discovered.host, discovered.port, timeout=8.0)
+        if not ready:
+            time.sleep(0.8)
+        network_url = target_url
 
     # Try to open a native GUI window using PyQt5
     try:
@@ -212,18 +335,14 @@ if __name__ == "__main__":
         from PyQt5.QtCore import QUrl
         import sys as qt_sys
         
-        if not ready:
-            time.sleep(0.8)  # tiny grace period
-        
         class WLANShareWindow(QMainWindow):
             def __init__(self):
                 super().__init__()
                 self.setWindowTitle("WLAN Share")
                 self.setGeometry(100, 100, 1000, 700)
                 
-                # Create web view
                 self.browser = QWebEngineView()
-                self.browser.setUrl(QUrl(URL))
+                self.browser.setUrl(QUrl(target_url))
                 self.setCentralWidget(self.browser)
             
             def closeEvent(self, event):
@@ -251,16 +370,12 @@ if __name__ == "__main__":
             from tkinter import messagebox
             import webbrowser
             
-            if not ready:
-                time.sleep(0.5)
-            
             class WLANShareApp:
                 def __init__(self, root):
                     self.root = root
                     self.root.title("WLAN Share")
                     self.root.geometry("1000x700")
                     
-                    # Info frame
                     info_frame = tk.Frame(root, bg="#2c3e50", pady=20)
                     info_frame.pack(fill=tk.X)
                     
@@ -273,22 +388,21 @@ if __name__ == "__main__":
                     )
                     title.pack()
                     
-                    subtitle = tk.Label(
+                    subtitle_text = "Dateien einfach über das lokale Netzwerk teilen"
+                    tk.Label(
                         info_frame,
-                        text="Dateien einfach über das lokale Netzwerk teilen",
+                        text=subtitle_text,
                         font=("Arial", 12),
                         fg="#ecf0f1",
                         bg="#2c3e50"
-                    )
-                    subtitle.pack()
+                    ).pack()
                     
-                    # URL display
                     url_frame = tk.Frame(root, pady=10)
                     url_frame.pack(fill=tk.X, padx=20)
                     
                     tk.Label(
                         url_frame,
-                        text="Server läuft auf:",
+                        text="Verbunden mit:",
                         font=("Arial", 10)
                     ).pack()
                     
@@ -298,18 +412,11 @@ if __name__ == "__main__":
                         justify="center",
                         fg="#3498db"
                     )
-                    url_text.insert(0, URL)
+                    url_text.insert(0, target_url)
                     url_text.config(state="readonly")
                     url_text.pack(fill=tk.X, pady=5)
                     
-                    # Get local IP
-                    try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        s.connect(("8.8.8.8", 80))
-                        local_ip = s.getsockname()[0]
-                        s.close()
-                        network_url = f"http://{local_ip}:{PORT}/"
-                        
+                    if network_url and network_url != target_url:
                         tk.Label(
                             url_frame,
                             text="Von anderen Geräten erreichbar unter:",
@@ -325,10 +432,7 @@ if __name__ == "__main__":
                         network_text.insert(0, network_url)
                         network_text.config(state="readonly")
                         network_text.pack(fill=tk.X, pady=5)
-                    except:
-                        pass
                     
-                    # Buttons
                     button_frame = tk.Frame(root, pady=20)
                     button_frame.pack()
                     
@@ -345,21 +449,20 @@ if __name__ == "__main__":
                     )
                     open_btn.pack(pady=10)
                     
-                    # Shared folder button
-                    folder_btn = tk.Button(
-                        button_frame,
-                        text="📂 Shared-Ordner öffnen",
-                        font=("Arial", 12),
-                        bg="#27ae60",
-                        fg="white",
-                        padx=20,
-                        pady=10,
-                        command=self.open_shared_folder,
-                        cursor="hand2"
-                    )
-                    folder_btn.pack(pady=5)
+                    if is_hosting:
+                        folder_btn = tk.Button(
+                            button_frame,
+                            text="📂 Shared-Ordner öffnen",
+                            font=("Arial", 12),
+                            bg="#27ae60",
+                            fg="white",
+                            padx=20,
+                            pady=10,
+                            command=self.open_shared_folder,
+                            cursor="hand2"
+                        )
+                        folder_btn.pack(pady=5)
                     
-                    # Info text
                     info_text = tk.Text(
                         root,
                         height=8,
@@ -372,13 +475,21 @@ if __name__ == "__main__":
                     )
                     info_text.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
                     
-                    info_content = f"""ℹ️ Informationen:
+                    if is_hosting:
+                        info_content = f"""ℹ️ Informationen:
 
 • Der Server läuft auf Port {PORT}
 • Freigegebene Dateien befinden sich in: {SHARED_DIR}
-• Andere Geräte im Netzwerk können auf den Server zugreifen
+• Andere Geräte im Netzwerk finden den Dienst via {MDNS_SERVICE_TYPE}
 • Klicken Sie auf "Im Browser öffnen" um die Web-Oberfläche zu starten
 • Das Fenster kann minimiert werden - der Server läuft weiter im Hintergrund"""
+                    else:
+                        info_content = f"""ℹ️ Informationen:
+
+• Bestehender WLAN Share Server gefunden unter: {target_url}
+• Dieses Gerät hostet keinen eigenen Server
+• Der Dienst wurde via mDNS ({MDNS_SERVICE_TYPE.strip('.')}) entdeckt
+• Sie können das Fenster schließen, um lediglich den Browser zu nutzen"""
                     
                     info_text.insert("1.0", info_content)
                     info_text.config(state="disabled")
@@ -386,13 +497,13 @@ if __name__ == "__main__":
                     self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
                 
                 def open_browser(self):
-                    webbrowser.open(URL)
+                    webbrowser.open(target_url)
                 
                 def open_shared_folder(self):
                     import subprocess
                     try:
                         subprocess.Popen(f'explorer "{SHARED_DIR}"')
-                    except:
+                    except Exception:
                         pass
                 
                 def on_closing(self):
@@ -406,9 +517,9 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[error] GUI initialization failed ({e}). Opening browser instead.")
             if ready:
-                webbrowser.open(URL)
+                webbrowser.open(target_url)
             else:
-                print("Server not ready yet. You can open:", URL)
-            # Keep the server alive in console mode:
-            t.join()
+                print("Server nicht erreichbar. Manuell öffnen:", target_url)
+            if server_thread:
+                server_thread.join()
 

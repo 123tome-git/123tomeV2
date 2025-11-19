@@ -6,4 +6,5 @@ pywin32; sys_platform == 'win32'
 PyQt5
 PyQt5-Qt5
 PyQtWebEngine
+zeroconf
 
