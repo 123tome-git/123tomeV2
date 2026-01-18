@@ -31,6 +31,7 @@ class LocalHttpServer(
                 method == Method.GET && uri == "/" -> serveMainPage()
                 method == Method.GET && uri == "/status" -> serveStatus()
                 method == Method.GET && uri == "/api/files" -> serveFileList()
+                method == Method.GET && uri == "/api/config" -> serveConfig()
                 method == Method.GET && uri == "/zip" -> serveZip()
                 method == Method.GET && uri.startsWith("/download/") -> serveDownload(uri)
                 method == Method.POST && uri == "/upload" -> handleUpload(session)
@@ -45,6 +46,15 @@ class LocalHttpServer(
 
     private fun serveStatus(): Response {
         return newFixedLengthResponse(Response.Status.OK, "application/json", """{"status":"ok","port":${listeningPort}}""")
+    }
+
+    private fun serveConfig(): Response {
+        // Phone server doesn't have BASE_DIR capability
+        return newFixedLengthResponse(
+            Response.Status.OK, 
+            "application/json", 
+            """{"shared_dir":"${sharedDir.absolutePath}","base_dir":null,"base_dir_readonly":false,"base_dir_available":false}"""
+        )
     }
 
     private fun serveFileList(): Response {
@@ -145,6 +155,7 @@ class LocalHttpServer(
         val fileCardsHtml = if (files.isNotEmpty()) {
             files.joinToString("\n") { file ->
                 val sizeMb = String.format("%.2f", file.length() / (1024.0 * 1024.0))
+                val encodedName = java.net.URLEncoder.encode(file.name, "UTF-8")
                 """
                 <div class="file-card">
                     <div class="file-info">
@@ -155,8 +166,8 @@ class LocalHttpServer(
                         </div>
                     </div>
                     <div class="file-actions">
-                        <a href="/download/${java.net.URLEncoder.encode(file.name, "UTF-8")}" class="download-btn">⬇ Download</a>
-                        <button class="delete-btn" onclick="deleteFile('${escapeJs(file.name)}')">🗑</button>
+                        <a href="/download/$encodedName" class="download-btn" data-filename="${escapeHtml(file.name)}">⬇ Download</a>
+                        <button type="button" class="delete-btn" data-filename="${escapeHtml(file.name)}">🗑</button>
                     </div>
                 </div>
                 """
@@ -182,10 +193,81 @@ class LocalHttpServer(
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; overflow-x: hidden; }
 .container { max-width: 1200px; margin: 0 auto; padding: 20px; width: 100%; }
-header { text-align: center; margin-bottom: 30px; color: white; }
+header { text-align: center; margin-bottom: 20px; color: white; }
 header h1 { font-size: 2rem; margin-bottom: 8px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
 header p { font-size: 1rem; opacity: 0.9; }
 section { background: white; border-radius: 15px; padding: 20px; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); overflow: hidden; }
+
+/* Mode toggle */
+.mode-toggle-container { display: flex; justify-content: center; margin-bottom: 20px; gap: 0; }
+.mode-toggle-btn { padding: 12px 16px; border: 2px solid rgba(255,255,255,0.5); background: rgba(255,255,255,0.1); color: white; font-weight: 600; cursor: pointer; transition: all 0.3s ease; font-size: 13px; -webkit-tap-highlight-color: transparent; }
+.mode-toggle-btn:first-child { border-radius: 8px 0 0 8px; border-right: none; }
+.mode-toggle-btn:last-child { border-radius: 0 8px 8px 0; }
+.mode-toggle-btn.active { background: white; color: #667eea; }
+.mode-toggle-btn:not(.active):active { background: rgba(255,255,255,0.2); }
+
+/* Shared space hidden class */
+.shared-space.hidden { display: none; }
+
+/* Desktop folders browser */
+.folder-browser { display: none; }
+.folder-browser.active { display: block; }
+
+.breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px; background: #f8f9fa; border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+.breadcrumb-item { color: #667eea; cursor: pointer; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+.breadcrumb-item:active { opacity: 0.7; }
+.breadcrumb-separator { color: #9ca3af; }
+.breadcrumb-current { color: #374151; font-weight: 500; }
+
+.folder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.folder-card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 12px; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); cursor: pointer; transition: all 0.2s ease; border: 1px solid #e5e7eb; -webkit-tap-highlight-color: transparent; }
+.folder-card:active { transform: scale(0.98); border-color: #667eea; }
+.folder-icon { font-size: 32px; }
+.folder-name { font-size: 12px; font-weight: 500; color: #374151; text-align: center; word-break: break-word; max-width: 100%; }
+
+.browser-file-card { display: flex; align-items: center; justify-content: space-between; padding: 12px; background: white; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border: 1px solid #e5e7eb; margin-bottom: 8px; }
+.browser-file-info { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.browser-file-icon { width: 32px; height: 32px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 6px; display: flex; align-items: center; justify-content: center; color: white; font-size: 14px; flex-shrink: 0; }
+.browser-file-details { flex: 1; min-width: 0; }
+.browser-file-name { font-weight: 500; color: #374151; word-break: break-word; font-size: 13px; }
+.browser-file-meta { font-size: 11px; color: #9ca3af; }
+.browser-file-actions { display: flex; gap: 6px; }
+.browser-action-btn { padding: 8px 10px; border-radius: 6px; border: none; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.2s; -webkit-tap-highlight-color: transparent; }
+.browser-download-btn { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; }
+.browser-delete-btn { background: #fee2e2; color: #dc2626; }
+.browser-download-btn:active, .browser-delete-btn:active { opacity: 0.8; transform: scale(0.95); }
+
+.browser-upload-area { background: linear-gradient(135deg, #f0f4ff 0%, #faf5ff 100%); border: 2px dashed #667eea; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 16px; cursor: pointer; transition: all 0.3s ease; -webkit-tap-highlight-color: transparent; }
+.browser-upload-area:active { border-color: #764ba2; background: #f3e8ff; }
+.browser-upload-area.dragover { border-color: #764ba2; background: #f3e8ff; }
+.browser-upload-btn { display: inline-block; padding: 8px 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; margin-top: 10px; font-size: 13px; }
+
+.readonly-notice { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; color: #92400e; font-size: 13px; }
+
+.no-basedir-notice { background: #f3f4f6; border-radius: 12px; padding: 30px 20px; text-align: center; color: #6b7280; }
+.no-basedir-notice h3 { margin-bottom: 8px; color: #374151; font-size: 16px; }
+.no-basedir-notice p { font-size: 13px; }
+
+.empty-folder { background: #f9fafb; border-radius: 12px; padding: 30px 20px; text-align: center; color: #9ca3af; }
+
+.browser-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px; }
+.browser-path-title { font-size: 14px; font-weight: 600; color: #374151; }
+.create-folder-btn { padding: 8px 12px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 12px; -webkit-tap-highlight-color: transparent; }
+.create-folder-btn:active { opacity: 0.8; transform: scale(0.95); }
+
+/* Modal */
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; padding: 20px; }
+.modal-overlay.active { display: flex; }
+.modal { background: white; border-radius: 12px; padding: 20px; width: 100%; max-width: 350px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
+.modal h3 { margin-bottom: 14px; color: #374151; font-size: 16px; }
+.modal input { width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; margin-bottom: 14px; }
+.modal-buttons { display: flex; justify-content: flex-end; gap: 10px; }
+.modal-btn { padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; font-size: 13px; -webkit-tap-highlight-color: transparent; }
+.modal-btn-cancel { background: #f3f4f6; color: #374151; }
+.modal-btn-create { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+.modal-btn:active { opacity: 0.8; }
+
+/* Existing styles */
 .upload-section { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
 .upload-area { text-align: center; padding: 30px 15px; border: 3px dashed rgba(255,255,255,0.5); border-radius: 15px; transition: all 0.3s ease; margin-bottom: 15px; }
 .upload-area.dragover { border-color: rgba(255,255,255,0.8); background: rgba(255,255,255,0.1); }
@@ -237,6 +319,7 @@ section { background: white; border-radius: 15px; padding: 20px; margin-bottom: 
     .sync-text-container { flex-direction: row; align-items: flex-start; }
     .sync-text-row { flex: 1; }
     .sync-buttons { flex-direction: column; }
+    .folder-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 }
     </style>
 </head>
@@ -247,69 +330,379 @@ section { background: white; border-radius: 15px; padding: 20px; margin-bottom: 
             <p>Dateien einfach über das lokale Netzwerk teilen</p>
         </header>
 
-        <section class="upload-section">
-            <div class="upload-area" id="uploadArea">
-                <div class="upload-icon">📤</div>
-                <h3>Dateien hochladen</h3>
-                <p>Tippen zum Auswählen</p>
-                <input type="file" id="fileInput" multiple accept="*/*">
-                <button class="select-files-btn" id="selectBtn">Dateien auswählen</button>
-            </div>
-            <div class="progress-container" id="progressContainer" style="display: none;">
-                <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-                <div class="progress-text" id="progressText">0%</div>
-            </div>
-            <div class="selected-files" id="selectedFiles" style="display: none;">
-                <h4>Ausgewählte Dateien:</h4>
-                <div class="file-list" id="fileList"></div>
-                <button class="upload-btn" id="uploadBtn">⬆ Hochladen</button>
-            </div>
-        </section>
+        <!-- Mode Toggle -->
+        <div class="mode-toggle-container">
+            <button class="mode-toggle-btn active" id="sharedModeBtn">📁 Freigegebene Dateien</button>
+            <button class="mode-toggle-btn" id="browserModeBtn">🖥️ Desktop-Ordner</button>
+        </div>
 
-        <section class="sync-text-section">
-            <h3>📋 Sync-Text</h3>
-            <div class="sync-text-container">
-                <div class="sync-text-row">
-                    <div class="text-input-wrapper">
-                        <textarea id="syncText" class="sync-text-field" placeholder="Text hier eingeben..." rows="1"></textarea>
-                        <div class="text-field-actions">
-                            <span class="status-indicator" id="statusIndicator"></span>
-                            <button class="send-btn" id="sendBtn" title="Send">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                                </svg>
-                            </button>
+        <!-- SHARED SPACE MODE -->
+        <div id="sharedSpace" class="shared-space">
+            <section class="upload-section">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📤</div>
+                    <h3>Dateien hochladen</h3>
+                    <p>Tippen zum Auswählen</p>
+                    <input type="file" id="fileInput" multiple accept="*/*">
+                    <button class="select-files-btn" id="selectBtn">Dateien auswählen</button>
+                </div>
+                <div class="progress-container" id="progressContainer" style="display: none;">
+                    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+                    <div class="progress-text" id="progressText">0%</div>
+                </div>
+                <div class="selected-files" id="selectedFiles" style="display: none;">
+                    <h4>Ausgewählte Dateien:</h4>
+                    <div class="file-list" id="fileList"></div>
+                    <button class="upload-btn" id="uploadBtn">⬆ Hochladen</button>
+                </div>
+            </section>
+
+            <section class="sync-text-section">
+                <h3>📋 Sync-Text</h3>
+                <div class="sync-text-container">
+                    <div class="sync-text-row">
+                        <div class="text-input-wrapper">
+                            <textarea id="syncText" class="sync-text-field" placeholder="Text hier eingeben..." rows="1"></textarea>
+                            <div class="text-field-actions">
+                                <span class="status-indicator" id="statusIndicator"></span>
+                                <button class="send-btn" id="sendBtn" title="Send">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
                     </div>
+                    <div class="sync-buttons">
+                        <button class="expand-btn" id="expandBtn" title="Expand/Collapse">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <polyline points="7 13 12 18 17 13"></polyline>
+                                <polyline points="7 6 12 11 17 6"></polyline>
+                            </svg>
+                        </button>
+                        <button class="copy-btn" id="copyBtn" title="Copy to clipboard">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
-                <div class="sync-buttons">
-                    <button class="expand-btn" id="expandBtn" title="Expand/Collapse">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                            <polyline points="7 13 12 18 17 13"></polyline>
-                            <polyline points="7 6 12 11 17 6"></polyline>
-                        </svg>
-                    </button>
-                    <button class="copy-btn" id="copyBtn" title="Copy to clipboard">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                        </svg>
-                    </button>
-                </div>
-            </div>
-        </section>
+            </section>
 
-        <section class="file-list-section">
-            <div class="section-header">
-                <h2>📂 Dateien (${files.size})</h2>
-                $zipButton
+            <section class="file-list-section">
+                <div class="section-header">
+                    <h2>📂 Dateien (${files.size})</h2>
+                    $zipButton
+                </div>
+                $filesSection
+            </section>
+        </div>
+
+        <!-- DESKTOP FOLDERS MODE -->
+        <div id="folderBrowser" class="folder-browser">
+            <section>
+                <div id="browserContent">
+                    <div class="no-basedir-notice" id="noBaseDirNotice">
+                        <h3>📂 Desktop-Ordner nicht verfügbar</h3>
+                        <p>Dieser Modus ist nur verfügbar, wenn Sie mit einem Desktop-Server verbunden sind.</p>
+                        <p style="margin-top:10px;font-size:12px;color:#9ca3af;">Der Server wird vom Handy gehostet.</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Create Folder Modal -->
+    <div class="modal-overlay" id="createFolderModal">
+        <div class="modal">
+            <h3>📁 Neuer Ordner</h3>
+            <input type="text" id="newFolderName" placeholder="Ordnername eingeben...">
+            <div class="modal-buttons">
+                <button class="modal-btn modal-btn-cancel" id="modalCancelBtn">Abbrechen</button>
+                <button class="modal-btn modal-btn-create" id="modalCreateBtn">Erstellen</button>
             </div>
-            $filesSection
-        </section>
+        </div>
     </div>
 
     <script>
+        // ========== MODE MANAGEMENT ==========
+        let currentMode = 'shared';
+        let browserConfig = null;
+        let browserCurrentPath = '';
+        let browserLastTreeData = null;
+        let desktopServerUrl = null; // Will be set if connected to desktop
+        
+        const sharedModeBtn = document.getElementById('sharedModeBtn');
+        const browserModeBtn = document.getElementById('browserModeBtn');
+        const sharedSpace = document.getElementById('sharedSpace');
+        const folderBrowser = document.getElementById('folderBrowser');
+        
+        sharedModeBtn.addEventListener('click', function() { switchMode('shared'); });
+        browserModeBtn.addEventListener('click', function() { switchMode('browser'); });
+        
+        function switchMode(mode) {
+            currentMode = mode;
+            sharedModeBtn.classList.toggle('active', mode === 'shared');
+            browserModeBtn.classList.toggle('active', mode === 'browser');
+            sharedSpace.classList.toggle('hidden', mode === 'browser');
+            folderBrowser.classList.toggle('active', mode === 'browser');
+            
+            if (mode === 'browser') {
+                loadBrowserConfig();
+            }
+        }
+        
+        async function loadBrowserConfig() {
+            // When phone is hosting, desktop folders aren't available
+            // This notice is already shown in the HTML
+            // If we had a desktop server URL, we would fetch from it here
+            if (desktopServerUrl) {
+                try {
+                    const response = await fetch(desktopServerUrl + '/api/config');
+                    if (response.ok) {
+                        browserConfig = await response.json();
+                        if (browserConfig.base_dir_available) {
+                            document.getElementById('noBaseDirNotice').style.display = 'none';
+                            browserCurrentPath = '';
+                            await loadFolderTree();
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error loading config:', error);
+                }
+            }
+        }
+        
+        async function loadFolderTree(path) {
+            if (!desktopServerUrl) return;
+            
+            path = path || '';
+            browserCurrentPath = path;
+            
+            try {
+                const response = await fetch(desktopServerUrl + '/api/tree?path=' + encodeURIComponent(path));
+                if (!response.ok) throw new Error('Failed to load folder');
+                
+                const data = await response.json();
+                browserLastTreeData = data;
+                renderFolderTree(data);
+            } catch (error) {
+                console.error('Error loading folder tree:', error);
+                document.getElementById('browserContent').innerHTML = '<div class="empty-folder"><p>❌ Fehler beim Laden</p></div>';
+            }
+        }
+        
+        function renderFolderTree(data) {
+            const currentPath = data.currentPath;
+            const parentPath = data.parentPath;
+            const items = data.items;
+            const readonly = data.readonly;
+            
+            let breadcrumbHTML = '<span class="breadcrumb-item" onclick="loadFolderTree(\\'\\')">🏠 Root</span>';
+            
+            if (currentPath) {
+                const parts = currentPath.split('/').filter(function(p) { return p; });
+                let pathSoFar = '';
+                
+                for (let i = 0; i < parts.length; i++) {
+                    pathSoFar += (i > 0 ? '/' : '') + parts[i];
+                    breadcrumbHTML += '<span class="breadcrumb-separator">/</span>';
+                    
+                    if (i === parts.length - 1) {
+                        breadcrumbHTML += '<span class="breadcrumb-current">' + parts[i] + '</span>';
+                    } else {
+                        breadcrumbHTML += '<span class="breadcrumb-item" onclick="loadFolderTree(\\'' + pathSoFar + '\\')">' + parts[i] + '</span>';
+                    }
+                }
+            }
+            
+            const folders = items.filter(function(i) { return i.type === 'dir'; });
+            const files = items.filter(function(i) { return i.type === 'file'; });
+            
+            let html = '<nav class="breadcrumb">' + breadcrumbHTML + '</nav>';
+            
+            if (readonly) {
+                html += '<div class="readonly-notice"><span>🔒</span><span>Nur-Lesen-Modus</span></div>';
+            }
+            
+            if (!readonly) {
+                html += '<div class="browser-upload-area" id="browserUploadArea"><div>📤 Dateien hochladen</div><small>Tippen zum Auswählen</small><input type="file" id="browserFileInput" multiple style="display:none;"></div>';
+            }
+            
+            html += '<div class="browser-toolbar"><span class="browser-path-title">' + folders.length + ' Ordner, ' + files.length + ' Dateien</span>';
+            if (!readonly) {
+                html += '<button class="create-folder-btn" id="createFolderBtn">📁 Neu</button>';
+            }
+            html += '</div>';
+            
+            if (folders.length > 0) {
+                html += '<div class="folder-grid">';
+                for (let i = 0; i < folders.length; i++) {
+                    const folder = folders[i];
+                    const folderPath = currentPath ? currentPath + '/' + folder.name : folder.name;
+                    html += '<div class="folder-card" data-path="' + folderPath + '"><div class="folder-icon">📁</div><div class="folder-name">' + folder.name + '</div></div>';
+                }
+                html += '</div>';
+            }
+            
+            if (files.length > 0) {
+                html += '<div class="browser-files-list">';
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    const sizeMB = file.size_mb !== null ? file.size_mb + ' MB' : '';
+                    html += '<div class="browser-file-card"><div class="browser-file-info"><div class="browser-file-icon">📄</div><div class="browser-file-details"><div class="browser-file-name">' + file.name + '</div><div class="browser-file-meta">' + sizeMB + '</div></div></div><div class="browser-file-actions"><button class="browser-action-btn browser-download-btn" data-path="' + currentPath + '" data-name="' + file.name + '">⬇️</button>';
+                    if (!readonly) {
+                        html += '<button class="browser-action-btn browser-delete-btn" data-path="' + currentPath + '" data-name="' + file.name + '">🗑️</button>';
+                    }
+                    html += '</div></div>';
+                }
+                html += '</div>';
+            }
+            
+            if (folders.length === 0 && files.length === 0) {
+                html += '<div class="empty-folder"><p>📂 Leerer Ordner</p></div>';
+            }
+            
+            document.getElementById('browserContent').innerHTML = html;
+            
+            // Setup event listeners
+            setupBrowserListeners(readonly);
+        }
+        
+        function setupBrowserListeners(readonly) {
+            // Folder click
+            document.querySelectorAll('.folder-card').forEach(function(card) {
+                card.addEventListener('click', function() {
+                    loadFolderTree(this.getAttribute('data-path'));
+                });
+            });
+            
+            // Download click
+            document.querySelectorAll('.browser-download-btn').forEach(function(btn) {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    browserDownload(this.getAttribute('data-path'), this.getAttribute('data-name'));
+                });
+            });
+            
+            // Delete click
+            document.querySelectorAll('.browser-delete-btn').forEach(function(btn) {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    browserDelete(this.getAttribute('data-path'), this.getAttribute('data-name'));
+                });
+            });
+            
+            // Upload area
+            const uploadArea = document.getElementById('browserUploadArea');
+            const fileInput = document.getElementById('browserFileInput');
+            if (uploadArea && fileInput) {
+                uploadArea.addEventListener('click', function() { fileInput.click(); });
+                fileInput.addEventListener('change', function() { handleBrowserUpload(this.files); });
+            }
+            
+            // Create folder
+            const createBtn = document.getElementById('createFolderBtn');
+            if (createBtn) {
+                createBtn.addEventListener('click', openCreateFolderModal);
+            }
+        }
+        
+        async function handleBrowserUpload(files) {
+            if (!files || files.length === 0 || !desktopServerUrl) return;
+            
+            for (let i = 0; i < files.length; i++) {
+                const formData = new FormData();
+                formData.append('file', files[i]);
+                
+                try {
+                    await fetch(desktopServerUrl + '/browse/upload?path=' + encodeURIComponent(browserCurrentPath), {
+                        method: 'POST',
+                        body: formData
+                    });
+                } catch (error) {
+                    console.error('Upload error:', error);
+                }
+            }
+            
+            await loadFolderTree(browserCurrentPath);
+        }
+        
+        function browserDownload(path, name) {
+            if (!desktopServerUrl) return;
+            const url = desktopServerUrl + '/browse/download?path=' + encodeURIComponent(path) + '&name=' + encodeURIComponent(name);
+            window.location.href = url;
+        }
+        
+        async function browserDelete(path, name) {
+            if (!desktopServerUrl) return;
+            if (!confirm('Datei "' + name + '" löschen?')) return;
+            
+            try {
+                const response = await fetch(desktopServerUrl + '/browse/delete?path=' + encodeURIComponent(path) + '&name=' + encodeURIComponent(name), {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    await loadFolderTree(browserCurrentPath);
+                } else {
+                    const error = await response.json();
+                    alert('Fehler: ' + error.detail);
+                }
+            } catch (error) {
+                console.error('Delete error:', error);
+                alert('Fehler beim Löschen');
+            }
+        }
+        
+        // Modal
+        const modal = document.getElementById('createFolderModal');
+        const modalInput = document.getElementById('newFolderName');
+        const modalCancelBtn = document.getElementById('modalCancelBtn');
+        const modalCreateBtn = document.getElementById('modalCreateBtn');
+        
+        function openCreateFolderModal() {
+            modal.classList.add('active');
+            modalInput.value = '';
+            modalInput.focus();
+        }
+        
+        function closeCreateFolderModal() {
+            modal.classList.remove('active');
+        }
+        
+        modalCancelBtn.addEventListener('click', closeCreateFolderModal);
+        modalCreateBtn.addEventListener('click', createFolder);
+        modalInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') createFolder();
+            else if (e.key === 'Escape') closeCreateFolderModal();
+        });
+        
+        async function createFolder() {
+            const name = modalInput.value.trim();
+            if (!name || !desktopServerUrl) return;
+            
+            try {
+                const response = await fetch(desktopServerUrl + '/browse/mkdir?path=' + encodeURIComponent(browserCurrentPath) + '&name=' + encodeURIComponent(name), {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    closeCreateFolderModal();
+                    await loadFolderTree(browserCurrentPath);
+                } else {
+                    const error = await response.json();
+                    alert('Fehler: ' + error.detail);
+                }
+            } catch (error) {
+                console.error('Create folder error:', error);
+                alert('Fehler beim Erstellen');
+            }
+        }
+        
+        // ========== SHARED SPACE FUNCTIONALITY ==========
         let selectedFiles = [];
         const fileInput = document.getElementById('fileInput');
         const selectBtn = document.getElementById('selectBtn');
@@ -321,10 +714,8 @@ section { background: white; border-radius: 15px; padding: 20px; margin-bottom: 
         const progressText = document.getElementById('progressText');
         const uploadBtn = document.getElementById('uploadBtn');
 
-        // File input styling - hide it properly
         fileInput.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;';
 
-        // Click handlers - prevent double triggers
         selectBtn.addEventListener('click', function(e) {
             e.preventDefault();
             e.stopPropagation();
@@ -341,7 +732,6 @@ section { background: white; border-radius: 15px; padding: 20px; margin-bottom: 
             uploadFiles();
         });
 
-        // Drag and drop
         uploadArea.addEventListener('dragover', function(e) { e.preventDefault(); this.classList.add('dragover'); });
         uploadArea.addEventListener('dragleave', function() { this.classList.remove('dragover'); });
         uploadArea.addEventListener('drop', function(e) {
@@ -393,8 +783,7 @@ section { background: white; border-radius: 15px; padding: 20px; margin-bottom: 
             setTimeout(function() { location.reload(); }, 1000);
         }
 
-        // Delete function - using window to make it global
-        window.deleteFile = async function(filename) {
+        async function deleteFile(filename) {
             if (!confirm('Datei "' + filename + '" löschen?')) return;
             try {
                 const response = await fetch('/delete/' + encodeURIComponent(filename), { method: 'DELETE' });
@@ -404,7 +793,19 @@ section { background: white; border-radius: 15px; padding: 20px; margin-bottom: 
                 console.error('Delete error:', error);
                 alert('Fehler beim Löschen: ' + error.message);
             }
-        };
+        }
+        
+        document.addEventListener('click', function(e) {
+            const deleteBtn = e.target.closest('.delete-btn');
+            if (deleteBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const filename = deleteBtn.getAttribute('data-filename');
+                if (filename) {
+                    deleteFile(filename);
+                }
+            }
+        }, true);
 
         // Sync text
         const syncText = document.getElementById('syncText');
@@ -521,6 +922,30 @@ section { background: white; border-radius: 15px; padding: 20px; margin-bottom: 
         }
         setInterval(pollSyncText, 1000);
         pollSyncText();
+
+        // Live file synchronization
+        let lastFileCount = ${files.size};
+        let lastFileNames = ${if (files.isEmpty()) "[]" else files.map { "\"${escapeJs(it.name)}\"" }.joinToString(",", "[", "]")};
+        
+        async function pollFileChanges() {
+            if (currentMode !== 'shared') return;
+            
+            try {
+                const response = await fetch('/api/files');
+                if (response.ok) {
+                    const files = await response.json();
+                    const currentNames = files.map(function(f) { return f.name; }).sort();
+                    const previousNames = lastFileNames.slice().sort();
+                    
+                    if (files.length !== lastFileCount || JSON.stringify(currentNames) !== JSON.stringify(previousNames)) {
+                        console.log('[sync] File list changed, reloading...');
+                        location.reload();
+                    }
+                }
+            } catch (error) { /* ignore */ }
+        }
+        
+        setInterval(pollFileChanges, 2000);
     </script>
 </body>
 </html>

@@ -5,6 +5,385 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WLAN Share</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        /* Mode toggle styles */
+        .mode-toggle-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+            gap: 0;
+        }
+        
+        .mode-toggle-btn {
+            padding: 12px 24px;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 14px;
+        }
+        
+        .mode-toggle-btn:first-child {
+            border-radius: 8px 0 0 8px;
+            border-right: none;
+        }
+        
+        .mode-toggle-btn:last-child {
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .mode-toggle-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .mode-toggle-btn:not(.active):hover {
+            background: #f3f4f6;
+        }
+        
+        /* Folder browser styles */
+        .folder-browser {
+            display: none;
+        }
+        
+        .folder-browser.active {
+            display: block;
+        }
+        
+        .shared-space {
+            display: block;
+        }
+        
+        .shared-space.hidden {
+            display: none;
+        }
+        
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+        
+        .breadcrumb-item {
+            color: #667eea;
+            cursor: pointer;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        
+        .breadcrumb-item:hover {
+            color: #764ba2;
+            text-decoration: underline;
+        }
+        
+        .breadcrumb-separator {
+            color: #9ca3af;
+        }
+        
+        .breadcrumb-current {
+            color: #374151;
+            font-weight: 500;
+        }
+        
+        .folder-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .folder-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid #e5e7eb;
+        }
+        
+        .folder-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+            border-color: #667eea;
+        }
+        
+        .folder-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        
+        .folder-name {
+            flex: 1;
+            font-weight: 500;
+            color: #374151;
+            word-break: break-word;
+        }
+        
+        .browser-file-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            border: 1px solid #e5e7eb;
+            margin-bottom: 8px;
+        }
+        
+        .browser-file-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .browser-file-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 16px;
+        }
+        
+        .browser-file-details {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .browser-file-name {
+            font-weight: 500;
+            color: #374151;
+            word-break: break-word;
+        }
+        
+        .browser-file-meta {
+            font-size: 12px;
+            color: #9ca3af;
+        }
+        
+        .browser-file-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .browser-action-btn {
+            padding: 8px 14px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .browser-download-btn {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+        }
+        
+        .browser-download-btn:hover {
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+        }
+        
+        .browser-delete-btn {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        
+        .browser-delete-btn:hover {
+            background: #fecaca;
+        }
+        
+        .browser-upload-area {
+            background: linear-gradient(135deg, #f0f4ff 0%, #faf5ff 100%);
+            border: 2px dashed #667eea;
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            margin-bottom: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .browser-upload-area:hover {
+            border-color: #764ba2;
+            background: linear-gradient(135deg, #e8eeff 0%, #f5ebff 100%);
+        }
+        
+        .browser-upload-area.dragover {
+            border-color: #764ba2;
+            background: #f3e8ff;
+        }
+        
+        .browser-upload-btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 12px;
+        }
+        
+        .readonly-notice {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #92400e;
+        }
+        
+        .no-basedir-notice {
+            background: #f3f4f6;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            color: #6b7280;
+        }
+        
+        .no-basedir-notice h3 {
+            margin-bottom: 8px;
+            color: #374151;
+        }
+        
+        .empty-folder {
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            color: #9ca3af;
+        }
+        
+        .create-folder-btn {
+            padding: 8px 16px;
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 13px;
+        }
+        
+        .create-folder-btn:hover {
+            box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+        }
+        
+        .browser-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        
+        .browser-path-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #374151;
+        }
+        
+        .browser-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        /* Modal styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal-overlay.active {
+            display: flex;
+        }
+        
+        .modal {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+        }
+        
+        .modal h3 {
+            margin-bottom: 16px;
+            color: #374151;
+        }
+        
+        .modal input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+        
+        .modal-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+        
+        .modal-btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        
+        .modal-btn-cancel {
+            background: #f3f4f6;
+            color: #374151;
+        }
+        
+        .modal-btn-create {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -13,103 +392,457 @@
             <p>Dateien einfach über das lokale Netzwerk teilen</p>
         </header>
 
-        <section class="upload-section">
-            <div class="upload-area" id="uploadArea">
-                <div class="upload-icon"></div>
-                <h3>Dateien hochladen</h3>
-                <p>Dateien hier hinziehen oder klicken zum Auswählen</p>
-                <input type="file" id="fileInput" multiple style="display: none;">
-                <button class="select-files-btn" onclick="document.getElementById('fileInput').click()">
-                    Dateien auswählen
-                </button>
-            </div>
-            
-            <div class="progress-container" id="progressContainer" style="display: none;">
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progressFill"></div>
-                </div>
-                <div class="progress-text" id="progressText">0%</div>
-            </div>
-            
-            <div class="selected-files" id="selectedFiles" style="display: none;">
-                <h4>Ausgewählte Dateien:</h4>
-                <div class="file-list" id="fileList"></div>
-                <button class="upload-btn" onclick="uploadFiles()"> Hochladen</button>
-            </div>
-        </section>
+        <!-- Mode Toggle -->
+        <div class="mode-toggle-container">
+            <button class="mode-toggle-btn active" id="sharedModeBtn" onclick="switchMode('shared')">
+                📁 Freigegebene Dateien
+            </button>
+            <button class="mode-toggle-btn" id="browserModeBtn" onclick="switchMode('browser')">
+                🖥️ Desktop-Ordner
+            </button>
+        </div>
 
-        <section class="sync-text-section">
-            <h3>📋 Sync-Text</h3>
-            <div class="sync-text-container">
-                <button class="expand-btn" id="expandBtn" onclick="toggleExpand()" title="Expand/Collapse">
-                    <svg id="expandIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <polyline points="7 13 12 18 17 13"></polyline>
-                        <polyline points="7 6 12 11 17 6"></polyline>
-                    </svg>
-                </button>
-                <div class="text-input-wrapper">
-                    <textarea 
-                        id="syncText" 
-                        class="sync-text-field" 
-                        placeholder="Text hier eingeben zum Synchronisieren..."
-                        rows="1"
-                    ></textarea>
-                    <div class="text-field-actions">
-                        <span class="status-indicator" id="statusIndicator"></span>
-                        <button class="send-btn" id="sendBtn" onclick="sendFromButton()" title="Send">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                                <line x1="22" y1="2" x2="11" y2="13"></line>
-                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                            </svg>
-                        </button>
+        <!-- SHARED SPACE MODE (existing functionality) -->
+        <div id="sharedSpace" class="shared-space">
+            <section class="upload-section">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon"></div>
+                    <h3>Dateien hochladen</h3>
+                    <p>Dateien hier hinziehen oder klicken zum Auswählen</p>
+                    <input type="file" id="fileInput" multiple style="display: none;">
+                    <button class="select-files-btn" onclick="document.getElementById('fileInput').click()">
+                        Dateien auswählen
+                    </button>
+                </div>
+                
+                <div class="progress-container" id="progressContainer" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
                     </div>
+                    <div class="progress-text" id="progressText">0%</div>
                 </div>
-                <button class="copy-btn" id="copyBtn" onclick="copyLastText()" title="Copy to clipboard">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                    </svg>
-                </button>
-            </div>
-        </section>
+                
+                <div class="selected-files" id="selectedFiles" style="display: none;">
+                    <h4>Ausgewählte Dateien:</h4>
+                    <div class="file-list" id="fileList"></div>
+                    <button class="upload-btn" onclick="uploadFiles()"> Hochladen</button>
+                </div>
+            </section>
 
-        <section class="file-list-section">
-            <div class="section-header">
-                <h2> Verfügbare Dateien ({{ files|length }})</h2>
-                {% if files %}
-                <a href="/zip" class="zip-download-btn"> Alles als ZIP</a>
-                {% endif %}
-            </div>
-
-            {% if files %}
-            <div class="files-grid">
-                {% for file in files %}
-                <div class="file-card">
-                    <div class="file-info">
-                        <div class="file-icon"></div>
-                        <div class="file-details">
-                            <div class="file-name">{{ file.name }}</div>
-                            <div class="file-size">{{ file.size_mb }} MB</div>
+            <section class="sync-text-section">
+                <h3>📋 Sync-Text</h3>
+                <div class="sync-text-container">
+                    <button class="expand-btn" id="expandBtn" onclick="toggleExpand()" title="Expand/Collapse">
+                        <svg id="expandIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <polyline points="7 13 12 18 17 13"></polyline>
+                            <polyline points="7 6 12 11 17 6"></polyline>
+                        </svg>
+                    </button>
+                    <div class="text-input-wrapper">
+                        <textarea 
+                            id="syncText" 
+                            class="sync-text-field" 
+                            placeholder="Text hier eingeben zum Synchronisieren..."
+                            rows="1"
+                        ></textarea>
+                        <div class="text-field-actions">
+                            <span class="status-indicator" id="statusIndicator"></span>
+                            <button class="send-btn" id="sendBtn" onclick="sendFromButton()" title="Send">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                </svg>
+                            </button>
                         </div>
                     </div>
-                    <div class="file-actions">
-                        <a href="/download/{{ file.name }}" class="download-btn"> Download</a>
-                        <button class="delete-btn" onclick="deleteFile('{{ file.name }}')"></button>
-                    </div>
+                    <button class="copy-btn" id="copyBtn" onclick="copyLastText()" title="Copy to clipboard">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                    </button>
                 </div>
-                {% endfor %}
+            </section>
+
+            <section class="file-list-section">
+                <div class="section-header">
+                    <h2> Verfügbare Dateien ({{ files|length }})</h2>
+                    {% if files %}
+                    <a href="/zip" class="zip-download-btn"> Alles als ZIP</a>
+                    {% endif %}
+                </div>
+
+                {% if files %}
+                <div class="files-grid">
+                    {% for file in files %}
+                    <div class="file-card">
+                        <div class="file-info">
+                            <div class="file-icon"></div>
+                            <div class="file-details">
+                                <div class="file-name">{{ file.name }}</div>
+                                <div class="file-size">{{ file.size_mb }} MB</div>
+                            </div>
+                        </div>
+                        <div class="file-actions">
+                            <a href="/download/{{ file.name }}" class="download-btn"> Download</a>
+                            <button class="delete-btn" onclick="deleteFile('{{ file.name }}')"></button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    <div class="empty-icon"></div>
+                    <h3>Keine Dateien vorhanden</h3>
+                    <p>Dateien hochladen um zu beginnen</p>
+                </div>
+                {% endif %}
+            </section>
+        </div>
+
+        <!-- DESKTOP FOLDERS MODE (new functionality) -->
+        <div id="folderBrowser" class="folder-browser">
+            <div id="browserContent">
+                <!-- Will be populated by JavaScript -->
+                <div class="no-basedir-notice" id="noBaseDirNotice">
+                    <h3>📂 Kein Desktop-Ordner konfiguriert</h3>
+                    <p>Wählen Sie in der Desktop-App einen Ordner aus, um ihn hier zu durchsuchen.</p>
+                </div>
             </div>
-            {% else %}
-            <div class="empty-state">
-                <div class="empty-icon"></div>
-                <h3>Keine Dateien vorhanden</h3>
-                <p>Dateien hochladen um zu beginnen</p>
+        </div>
+    </div>
+
+    <!-- Create Folder Modal -->
+    <div class="modal-overlay" id="createFolderModal">
+        <div class="modal">
+            <h3>📁 Neuer Ordner</h3>
+            <input type="text" id="newFolderName" placeholder="Ordnername eingeben..." autofocus>
+            <div class="modal-buttons">
+                <button class="modal-btn modal-btn-cancel" onclick="closeCreateFolderModal()">Abbrechen</button>
+                <button class="modal-btn modal-btn-create" onclick="createFolder()">Erstellen</button>
             </div>
-            {% endif %}
-        </section>
+        </div>
     </div>
 
     <script>
+        // ========== MODE MANAGEMENT ==========
+        let currentMode = 'shared';
+        let browserConfig = null;
+        let browserCurrentPath = '';
+        let browserLastTreeData = null;
+        
+        function switchMode(mode) {
+            currentMode = mode;
+            
+            // Update toggle buttons
+            document.getElementById('sharedModeBtn').classList.toggle('active', mode === 'shared');
+            document.getElementById('browserModeBtn').classList.toggle('active', mode === 'browser');
+            
+            // Show/hide sections
+            document.getElementById('sharedSpace').classList.toggle('hidden', mode === 'browser');
+            document.getElementById('folderBrowser').classList.toggle('active', mode === 'browser');
+            
+            if (mode === 'browser') {
+                loadBrowserConfig();
+            }
+        }
+        
+        async function loadBrowserConfig() {
+            try {
+                const response = await fetch('/api/config');
+                if (response.ok) {
+                    browserConfig = await response.json();
+                    if (browserConfig.base_dir_available) {
+                        document.getElementById('noBaseDirNotice').style.display = 'none';
+                        browserCurrentPath = '';
+                        await loadFolderTree();
+                    } else {
+                        document.getElementById('noBaseDirNotice').style.display = 'block';
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading config:', error);
+            }
+        }
+        
+        async function loadFolderTree(path = '') {
+            browserCurrentPath = path;
+            
+            try {
+                const response = await fetch(`/api/tree?path=${encodeURIComponent(path)}`);
+                if (!response.ok) {
+                    throw new Error('Failed to load folder');
+                }
+                
+                const data = await response.json();
+                browserLastTreeData = data;
+                renderFolderTree(data);
+            } catch (error) {
+                console.error('Error loading folder tree:', error);
+                document.getElementById('browserContent').innerHTML = `
+                    <div class="empty-folder">
+                        <p>❌ Fehler beim Laden des Ordners</p>
+                        <p style="font-size: 12px;">${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+        
+        function renderFolderTree(data) {
+            const { currentPath, parentPath, items, readonly } = data;
+            
+            // Build breadcrumb
+            let breadcrumbHTML = `<span class="breadcrumb-item" onclick="loadFolderTree('')">🏠 Root</span>`;
+            
+            if (currentPath) {
+                const parts = currentPath.split('/').filter(p => p);
+                let pathSoFar = '';
+                
+                for (let i = 0; i < parts.length; i++) {
+                    pathSoFar += (i > 0 ? '/' : '') + parts[i];
+                    breadcrumbHTML += `<span class="breadcrumb-separator">/</span>`;
+                    
+                    if (i === parts.length - 1) {
+                        breadcrumbHTML += `<span class="breadcrumb-current">${parts[i]}</span>`;
+                    } else {
+                        breadcrumbHTML += `<span class="breadcrumb-item" onclick="loadFolderTree('${pathSoFar}')">${parts[i]}</span>`;
+                    }
+                }
+            }
+            
+            // Separate folders and files
+            const folders = items.filter(i => i.type === 'dir');
+            const files = items.filter(i => i.type === 'file');
+            
+            // Build content
+            let html = `
+                <nav class="breadcrumb">${breadcrumbHTML}</nav>
+            `;
+            
+            // Readonly notice
+            if (readonly) {
+                html += `
+                    <div class="readonly-notice">
+                        <span>🔒</span>
+                        <span>Dieser Ordner ist schreibgeschützt. Upload und Löschen sind deaktiviert.</span>
+                    </div>
+                `;
+            }
+            
+            // Upload area (only if not readonly)
+            if (!readonly) {
+                html += `
+                    <div class="browser-upload-area" id="browserUploadArea" onclick="document.getElementById('browserFileInput').click()">
+                        <div>📤 Dateien hier hochladen</div>
+                        <small>Dateien hinziehen oder klicken zum Auswählen</small>
+                        <input type="file" id="browserFileInput" multiple style="display: none;" onchange="handleBrowserUpload(this.files)">
+                    </div>
+                `;
+            }
+            
+            // Toolbar
+            html += `
+                <div class="browser-toolbar">
+                    <span class="browser-path-title">
+                        ${folders.length} Ordner, ${files.length} Dateien
+                    </span>
+                    <div class="browser-actions">
+                        ${!readonly ? `<button class="create-folder-btn" onclick="openCreateFolderModal()">📁 Neuer Ordner</button>` : ''}
+                    </div>
+                </div>
+            `;
+            
+            // Folders grid
+            if (folders.length > 0) {
+                html += `<div class="folder-grid">`;
+                for (const folder of folders) {
+                    const folderPath = currentPath ? `${currentPath}/${folder.name}` : folder.name;
+                    html += `
+                        <div class="folder-card" onclick="loadFolderTree('${folderPath}')">
+                            <div class="folder-icon">📁</div>
+                            <div class="folder-name">${folder.name}</div>
+                        </div>
+                    `;
+                }
+                html += `</div>`;
+            }
+            
+            // Files list
+            if (files.length > 0) {
+                html += `<div class="browser-files-list">`;
+                for (const file of files) {
+                    const sizeMB = file.size_mb !== null ? `${file.size_mb} MB` : '';
+                    html += `
+                        <div class="browser-file-card">
+                            <div class="browser-file-info">
+                                <div class="browser-file-icon">📄</div>
+                                <div class="browser-file-details">
+                                    <div class="browser-file-name">${file.name}</div>
+                                    <div class="browser-file-meta">${sizeMB}</div>
+                                </div>
+                            </div>
+                            <div class="browser-file-actions">
+                                <button class="browser-action-btn browser-download-btn" onclick="browserDownload('${currentPath}', '${file.name}')">
+                                    ⬇️ Download
+                                </button>
+                                ${!readonly ? `
+                                <button class="browser-action-btn browser-delete-btn" onclick="browserDelete('${currentPath}', '${file.name}')">
+                                    🗑️
+                                </button>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `;
+                }
+                html += `</div>`;
+            }
+            
+            // Empty state
+            if (folders.length === 0 && files.length === 0) {
+                html += `
+                    <div class="empty-folder">
+                        <p>📂 Dieser Ordner ist leer</p>
+                    </div>
+                `;
+            }
+            
+            document.getElementById('browserContent').innerHTML = html;
+            
+            // Setup drag-drop for upload area
+            if (!readonly) {
+                setupBrowserDragDrop();
+            }
+        }
+        
+        function setupBrowserDragDrop() {
+            const uploadArea = document.getElementById('browserUploadArea');
+            if (!uploadArea) return;
+            
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                handleBrowserUpload(e.dataTransfer.files);
+            });
+        }
+        
+        async function handleBrowserUpload(files) {
+            if (!files || files.length === 0) return;
+            
+            for (const file of files) {
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                try {
+                    await fetch(`/browse/upload?path=${encodeURIComponent(browserCurrentPath)}`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                } catch (error) {
+                    console.error('Upload error:', error);
+                }
+            }
+            
+            // Reload folder
+            await loadFolderTree(browserCurrentPath);
+        }
+        
+        function browserDownload(path, name) {
+            const url = `/browse/download?path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}`;
+            window.location.href = url;
+        }
+        
+        async function browserDelete(path, name) {
+            if (!confirm(`Datei "${name}" wirklich löschen?`)) return;
+            
+            try {
+                const response = await fetch(`/browse/delete?path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    await loadFolderTree(browserCurrentPath);
+                } else {
+                    const error = await response.json();
+                    alert(`Fehler: ${error.detail}`);
+                }
+            } catch (error) {
+                console.error('Delete error:', error);
+                alert('Fehler beim Löschen');
+            }
+        }
+        
+        function openCreateFolderModal() {
+            document.getElementById('createFolderModal').classList.add('active');
+            document.getElementById('newFolderName').value = '';
+            document.getElementById('newFolderName').focus();
+        }
+        
+        function closeCreateFolderModal() {
+            document.getElementById('createFolderModal').classList.remove('active');
+        }
+        
+        async function createFolder() {
+            const name = document.getElementById('newFolderName').value.trim();
+            if (!name) return;
+            
+            try {
+                const response = await fetch(`/browse/mkdir?path=${encodeURIComponent(browserCurrentPath)}&name=${encodeURIComponent(name)}`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    closeCreateFolderModal();
+                    await loadFolderTree(browserCurrentPath);
+                } else {
+                    const error = await response.json();
+                    alert(`Fehler: ${error.detail}`);
+                }
+            } catch (error) {
+                console.error('Create folder error:', error);
+                alert('Fehler beim Erstellen');
+            }
+        }
+        
+        // Enter key in modal
+        document.getElementById('newFolderName').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                createFolder();
+            } else if (e.key === 'Escape') {
+                closeCreateFolderModal();
+            }
+        });
+        
+        // Poll for browser changes
+        async function pollBrowserChanges() {
+            if (currentMode !== 'browser' || !browserConfig?.base_dir_available) return;
+            
+            try {
+                const response = await fetch(`/api/tree?path=${encodeURIComponent(browserCurrentPath)}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const newJson = JSON.stringify(data.items.map(i => i.name + i.type));
+                    const oldJson = browserLastTreeData ? JSON.stringify(browserLastTreeData.items.map(i => i.name + i.type)) : '';
+                    
+                    if (newJson !== oldJson) {
+                        browserLastTreeData = data;
+                        renderFolderTree(data);
+                    }
+                }
+            } catch (error) {
+                // Ignore
+            }
+        }
+        
+        // ========== SHARED SPACE FUNCTIONALITY ==========
         let selectedFiles = [];
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
@@ -122,6 +855,10 @@
         uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
             uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
         });
 
         uploadArea.addEventListener('drop', (e) => {
@@ -448,9 +1185,36 @@
             }
         }
 
-        // Start polling
+        // Start polling for sync text
         setInterval(pollSyncText, 1000);
         pollSyncText(); // Initial load
+
+        // Live file synchronization
+        let lastFileList = JSON.stringify({{ files | tojson }});
+        
+        async function pollFileChanges() {
+            if (currentMode !== 'shared') return;
+            
+            try {
+                const response = await fetch('/api/files');
+                if (response.ok) {
+                    const files = await response.json();
+                    const currentFileList = JSON.stringify(files);
+                    if (currentFileList !== lastFileList) {
+                        console.log('[sync] File list changed, reloading...');
+                        location.reload();
+                    }
+                }
+            } catch (error) {
+                // Ignore errors
+            }
+        }
+        
+        // Poll for file changes every 2 seconds
+        setInterval(pollFileChanges, 2000);
+        
+        // Poll for browser changes every 3 seconds
+        setInterval(pollBrowserChanges, 3000);
     </script>
 </body>
 </html>
