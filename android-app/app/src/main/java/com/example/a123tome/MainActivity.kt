@@ -15,7 +15,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import fi.iki.elonen.NanoHTTPD
-import java.io.IOException
+import java.net.Inet4Address
+import java.net.NetworkInterface
 
 class MainActivity : Activity() {
 
@@ -35,6 +36,7 @@ class MainActivity : Activity() {
 
     private var localServer: LocalHttpServer? = null
     private var localPort: Int = 8000
+    private var localIpAddress: String = "127.0.0.1"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,6 +123,10 @@ class MainActivity : Activity() {
 
             override fun onDiscoveryStopped(serviceType: String?) {
                 Log.i(TAG, "Discovery stopped: $serviceType")
+                if (!hasResolved) {
+                    Log.w(TAG, "Discovery stopped without resolution, starting local server")
+                    startLocalServer()
+                }
             }
 
             override fun onStartDiscoveryFailed(serviceType: String?, errorCode: Int) {
@@ -154,28 +160,87 @@ class MainActivity : Activity() {
         if (hasResolved) return
         hasResolved = true
         handler.removeCallbacks(timeoutRunnable)
-        stopDiscovery()
-        Toast.makeText(this, "Kein WLAN Share Server via mDNS gefunden. Lokaler Server wird gestartet.", Toast.LENGTH_LONG).show()
-        // Start NanoHTTPD on localhost
-        tryStartServer()
-        // Advertise via NSD so others can discover this phone
-        registerLocalService()
-        loadUrl("http://127.0.0.1:$localPort/")
+        stopDiscoveryOnly() // Stop discovery but keep multicast lock for NSD advertisement
+        
+        // Ensure multicast lock is held for NSD to work
+        acquireMulticastLock()
+        
+        // Get the device's WiFi IP address
+        localIpAddress = getWifiIpAddress() ?: "127.0.0.1"
+        Log.i(TAG, "Device IP address: $localIpAddress")
+
+        // Start NanoHTTPD on all interfaces (0.0.0.0)
+        val started = tryStartServer()
+
+        if (started) {
+            val networkUrl = "http://$localIpAddress:$localPort/"
+            Toast.makeText(this, "Server gestartet: $networkUrl", Toast.LENGTH_LONG).show()
+            Log.i(TAG, "Server accessible at: $networkUrl")
+            
+            // Advertise via NSD so others can discover this phone
+            registerLocalService()
+            // Load using localhost for the local webview
+            loadUrl("http://127.0.0.1:$localPort/")
+        } else {
+            Toast.makeText(this, "Server konnte nicht gestartet werden", Toast.LENGTH_LONG).show()
+            // As a last resort, render an inline info page so the user sees something
+            val fallbackHtml = """
+                <html><body style="font-family: sans-serif; padding: 24px;">
+                    <h2>WLAN Share</h2>
+                    <p>Der lokale HTTP-Server konnte nicht gestartet werden.</p>
+                    <p>Bitte WLAN prüfen und die App neu starten.</p>
+                </body></html>
+            """.trimIndent()
+            loadUrl("data:text/html;charset=utf-8,$fallbackHtml")
+        }
+    }
+    
+    private fun getWifiIpAddress(): String? {
+        try {
+            // Method 1: Try WifiManager (deprecated but works)
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val wifiInfo = wifiManager.connectionInfo
+            val ipInt = wifiInfo.ipAddress
+            if (ipInt != 0) {
+                val ip = String.format(
+                    "%d.%d.%d.%d",
+                    ipInt and 0xff,
+                    ipInt shr 8 and 0xff,
+                    ipInt shr 16 and 0xff,
+                    ipInt shr 24 and 0xff
+                )
+                if (ip != "0.0.0.0") return ip
+            }
+            
+            // Method 2: Enumerate network interfaces
+            NetworkInterface.getNetworkInterfaces()?.toList()?.forEach { networkInterface ->
+                if (networkInterface.isUp && !networkInterface.isLoopback) {
+                    networkInterface.inetAddresses.toList().forEach { address ->
+                        if (!address.isLoopbackAddress && address is Inet4Address) {
+                            return address.hostAddress
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting IP address", e)
+        }
+        return null
     }
 
-    private fun tryStartServer() {
-        if (localServer != null) return
+    private fun tryStartServer(): Boolean {
+        if (localServer != null) return true
         var port = localPort
         var lastError: Exception? = null
         repeat(5) {
             try {
-                val server = LocalHttpServer(port)
-                // NanoHTTPD default SOCKET_READ_TIMEOUT is 5000; we don't need to set explicitly
+                // Pass context and bind to all interfaces (0.0.0.0) for network access
+                val server = LocalHttpServer(this, port, "0.0.0.0")
                 server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
                 localServer = server
                 localPort = port
-                Log.i(TAG, "Local HTTP server started on 127.0.0.1:$port")
-                return
+                Log.i(TAG, "Local HTTP server started on 0.0.0.0:$port (accessible via $localIpAddress:$port)")
+                return true
             } catch (e: Exception) {
                 lastError = e
                 Log.w(TAG, "Port $port busy, trying next...", e)
@@ -185,6 +250,7 @@ class MainActivity : Activity() {
         if (lastError != null) {
             Log.e(TAG, "Failed to start local server", lastError)
         }
+        return false
     }
 
     private fun registerLocalService() {
@@ -222,7 +288,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun stopDiscovery() {
+    private fun stopDiscoveryOnly() {
         handler.removeCallbacks(timeoutRunnable)
         discoveryListener?.let {
             try {
@@ -235,6 +301,11 @@ class MainActivity : Activity() {
         }
         discoveryListener = null
         resolveListener = null
+        // Keep multicast lock for NSD service advertisement
+    }
+
+    private fun stopDiscovery() {
+        stopDiscoveryOnly()
         releaseMulticastLock()
     }
 

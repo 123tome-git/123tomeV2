@@ -91,35 +91,98 @@ def get_local_ip(fallback: str = "127.0.0.1") -> str:
 
 def discover_existing_service(timeout: float = MDNS_DISCOVERY_TIMEOUT) -> Optional[MdnsService]:
     if Zeroconf is None:
+        print("[mdns] zeroconf library not available, skipping mDNS discovery")
         return None
 
-    zeroconf = Zeroconf()
+    print(f"[mdns] Starting service discovery for {MDNS_SERVICE_TYPE} (timeout: {timeout}s)")
+    
+    try:
+        zeroconf = Zeroconf()
+    except Exception as e:
+        print(f"[mdns] Failed to initialize Zeroconf: {e}")
+        return None
+        
     found: Optional[MdnsService] = None
     event = threading.Event()
 
     class Listener:  # type: ignore[override]
         def add_service(self, zc, service_type, name):
             nonlocal found
+            print(f"[mdns] Service found: {name} (type: {service_type})")
             info = zc.get_service_info(service_type, name)
             if info:
                 addresses = info.parsed_addresses()
+                print(f"[mdns] Service info: addresses={addresses}, port={info.port}")
                 if addresses:
                     found = MdnsService(name=name, host=addresses[0], port=info.port)
                     event.set()
+            else:
+                print(f"[mdns] Could not get service info for {name}")
 
         def update_service(self, zc, service_type, name):
-            pass
+            print(f"[mdns] Service updated: {name}")
 
         def remove_service(self, zc, service_type, name):
-            pass
+            print(f"[mdns] Service removed: {name}")
 
     listener = Listener()
-    browser = ServiceBrowser(zeroconf, MDNS_SERVICE_TYPE, listener)
-    event.wait(timeout)
-    with suppress(Exception):
-        browser.cancel()
-    zeroconf.close()
+    try:
+        browser = ServiceBrowser(zeroconf, MDNS_SERVICE_TYPE, listener)
+        event.wait(timeout)
+        with suppress(Exception):
+            browser.cancel()
+    except Exception as e:
+        print(f"[mdns] Discovery error: {e}")
+    finally:
+        zeroconf.close()
+    
+    if found:
+        print(f"[mdns] Discovery successful: {found.host}:{found.port}")
+    else:
+        print("[mdns] No service found within timeout")
     return found
+
+
+def try_direct_connection(host: str, port: int, timeout: float = 2.0) -> bool:
+    """Try to connect directly to a potential server."""
+    try:
+        import urllib.request
+        url = f"http://{host}:{port}/status"
+        req = urllib.request.Request(url, method='GET')
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
+def scan_network_for_server(port: int = 8000, timeout: float = 1.0) -> Optional[MdnsService]:
+    """Scan common local network IPs for the server as fallback."""
+    print("[scan] Scanning local network for WLAN Share server...")
+    local_ip = get_local_ip()
+    if local_ip == "127.0.0.1":
+        return None
+    
+    # Get network prefix (e.g., 192.168.1.)
+    parts = local_ip.split('.')
+    if len(parts) != 4:
+        return None
+    prefix = '.'.join(parts[:3]) + '.'
+    
+    # Common device IPs to check (skip our own IP)
+    own_last_octet = int(parts[3])
+    candidates = [1, 2, 100, 101, 102, 103, 104, 105, 50, 51, 52, 53, 54, 55, 
+                  60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70]
+    
+    for last_octet in candidates:
+        if last_octet == own_last_octet:
+            continue
+        host = f"{prefix}{last_octet}"
+        if try_direct_connection(host, port, timeout):
+            print(f"[scan] Found server at {host}:{port}")
+            return MdnsService(name="WLAN Share (scanned)", host=host, port=port)
+    
+    print("[scan] No server found via network scan")
+    return None
 
 
 def register_mdns_service(port: int, local_ip: str) -> Optional[MdnsRegistration]:
@@ -171,6 +234,11 @@ def get_file_list():
 async def index(request: Request):
     files = get_file_list()
     return templates.TemplateResponse("index.html", {"request": request, "files": files})
+
+@app.get("/status")
+async def status():
+    """Health check endpoint for service discovery."""
+    return {"status": "ok", "service": "WLAN Share"}
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -291,7 +359,13 @@ if __name__ == "__main__":
 
     HOST, PORT = "0.0.0.0", 8000
 
-    discovered = discover_existing_service()
+    print("=" * 50)
+    print("WLAN Share - Starting...")
+    print("=" * 50)
+    
+    # Scan network for existing server
+    discovered = scan_network_for_server(PORT)
+    
     is_hosting = discovered is None
     target_host = "127.0.0.1" if is_hosting else discovered.host
     target_port = PORT if is_hosting else discovered.port
@@ -302,7 +376,7 @@ if __name__ == "__main__":
     server_thread: Optional[threading.Thread] = None
 
     if is_hosting:
-        print("[mdns] No existing WLAN Share service found. Hosting locally.")
+        print("[discovery] No existing WLAN Share service found. Hosting locally.")
 
         clipboard_thread = threading.Thread(target=monitor_clipboard, daemon=True)
         clipboard_thread.start()
